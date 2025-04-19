@@ -1,5 +1,6 @@
 package com.namit.presentation_displays
 
+import android.app.Activity
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.hardware.display.DisplayManager
@@ -16,10 +17,10 @@ import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
-import io.flutter.plugin.common.PluginRegistry
 import org.json.JSONObject
 
 /** PresentationDisplaysPlugin */
@@ -34,15 +35,18 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
   override fun onAttachedToEngine(
       @NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
   ) {
-    channel = MethodChannel(flutterPluginBinding.binaryMessenger, viewTypeId)
+    val messenger = flutterPluginBinding.binaryMessenger
+    channel = MethodChannel(messenger, viewTypeId)
     channel.setMethodCallHandler(this)
 
-    eventChannel = EventChannel(flutterPluginBinding.binaryMessenger, viewTypeEventsId)
+    eventChannel = EventChannel(messenger, viewTypeEventsId)
     displayManager =
         flutterPluginBinding.applicationContext.getSystemService(Context.DISPLAY_SERVICE) as
             DisplayManager
     val displayConnectedStreamHandler = DisplayConnectedStreamHandler(displayManager)
     eventChannel.setStreamHandler(displayConnectedStreamHandler)
+    context = flutterPluginBinding.applicationContext
+    setup(messenger,context)
   }
 
   companion object {
@@ -53,13 +57,12 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
     /** @hide */
     @Suppress("unused", "DEPRECATION")
     @JvmStatic
-    fun registerWith(registrar: PluginRegistry.Registrar) {
-      val channel = MethodChannel(registrar.messenger(), viewTypeId)
+    fun setup(binaryMessenger: BinaryMessenger,context: Context?) {
+      val channel = MethodChannel(binaryMessenger, viewTypeId)
       channel.setMethodCallHandler(PresentationDisplaysPlugin())
 
-      val eventChannel = EventChannel(registrar.messenger(), viewTypeEventsId)
-      displayManager =
-          registrar.activity()!!.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+      val eventChannel = EventChannel(binaryMessenger, viewTypeEventsId)
+      displayManager =  context?.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
       val displayConnectedStreamHandler = DisplayConnectedStreamHandler(displayManager)
       eventChannel.setStreamHandler(displayConnectedStreamHandler)
     }
