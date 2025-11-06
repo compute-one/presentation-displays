@@ -1,5 +1,6 @@
 package com.namit.presentation_displays
 
+import android.app.Presentation
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.hardware.display.DisplayManager
@@ -29,7 +30,7 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
     private lateinit var eventChannel: EventChannel
     private var flutterEngineChannel: MethodChannel? = null
     private var context: Context? = null
-    private var presentation: PresentationDisplay? = null
+    private val presentations = mutableMapOf<String, PresentationDisplay>()
     private var binaryMessenger: BinaryMessenger? = null
     private val activeEngines = mutableMapOf<String, FlutterEngine>()
 
@@ -90,26 +91,40 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
                     )
                     val displayId: Int = obj.getInt("displayId")
                     val tag: String = obj.getString("routerName")
-                    val display = displayManager?.getDisplay(displayId)
-                    if (display != null) {
-                        val flutterEngine = createFlutterEngine(tag)
-                        flutterEngine?.let {
-                            flutterEngineChannel =
-                                MethodChannel(
-                                    it.dartExecutor.binaryMessenger,
-                                    "${viewTypeId}_engine"
-                                )
-                            presentation =
-                                context?.let { it1 -> PresentationDisplay(it1, tag, display) }
-                            Log.i(TAG, "presentation: $presentation")
-                            presentation?.show()
-
-                            result.success(true)
-                        }
-                            ?: result.error("404", "Can't find FlutterEngine", null)
-                    } else {
-                        result.error("404", "Can't find display with displayId is $displayId", null)
+                    val existing = presentations[tag]
+                    if (existing != null && existing.isShowing) {
+                        Log.i(
+                            TAG,
+                            "Presentation for tag '$tag' already active — skipping creation."
+                        )
+                        result.success(true)
+                        return
                     }
+
+                    val display = displayManager?.getDisplay(displayId)
+                    if (display == null) {
+                        result.error("404", "Can't find display with displayId = $displayId", null)
+                        return
+                    }
+
+                    val flutterEngine = activeEngines[tag] ?: createFlutterEngine(tag)
+                    if (flutterEngine == null) {
+                        result.error("404", "Can't create FlutterEngine for tag = $tag", null)
+                        return
+                    }
+                    flutterEngineChannel =
+                        MethodChannel(
+                            flutterEngine.dartExecutor.binaryMessenger,
+                            "${viewTypeId}_engine"
+                        )
+                    context?.let { it1 ->
+                        val presentation = PresentationDisplay(it1, tag, display)
+                        Log.i(TAG, "presentation: $presentation")
+                        presentation.show()
+                        presentations[tag] = presentation
+                        result.success(true)
+                    }
+
                 } catch (e: Exception) {
                     result.error(call.method, e.message, null)
                 }
@@ -118,22 +133,19 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
             "hidePresentation" -> {
                 try {
                     val obj = JSONObject(call.arguments as String)
-                    val tag = obj.optString("routerName", "")
-                    Log.i(TAG, "Hiding presentation for tag: $tag")
+                    val tag = obj.getString("routerName")
 
-                    if (presentation != null) {
-                        if (presentation?.flutterView != null) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                                presentation?.flutterView?.detachFromFlutterEngine()
-                            }
-                        }
-                        presentation?.dismiss()
-                        presentation = null;
+                    presentations[tag]?.let {
+                        Log.i(TAG, "Hiding presentation for tag '$tag'")
+                        it.dismiss()
+                        presentations.remove(tag)
                     }
-                    activeEngines[tag]?.destroy()
-                    activeEngines.remove(tag)
-                    FlutterEngineCache.getInstance().remove(tag)
 
+                    activeEngines[tag]?.let {
+                        Log.i(TAG, "Destroying engine for tag '$tag'")
+                        it.destroy()
+                        activeEngines.remove(tag)
+                    }
                     result.success(true)
                 } catch (e: Exception) {
                     result.error(call.method, e.message, null)
