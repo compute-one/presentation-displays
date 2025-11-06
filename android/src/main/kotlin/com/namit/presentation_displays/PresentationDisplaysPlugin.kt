@@ -1,10 +1,8 @@
 package com.namit.presentation_displays
 
-import android.app.Presentation
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.hardware.display.DisplayManager
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
