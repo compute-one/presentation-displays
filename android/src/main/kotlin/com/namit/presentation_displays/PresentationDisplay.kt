@@ -13,6 +13,8 @@ import io.flutter.embedding.engine.FlutterEngineCache
 class PresentationDisplay(context: Context, private val tag: String, display: Display) :
     Presentation(context, display) {
 
+    var flutterView: FlutterView? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -25,11 +27,12 @@ class PresentationDisplay(context: Context, private val tag: String, display: Di
 
         setContentView(flContainer)
 
-        val flutterView = FlutterView(context)
+        var flutterView = FlutterView(context)
         flContainer.addView(flutterView, params)
         val flutterEngine = FlutterEngineCache.getInstance().get(tag)
         if (flutterEngine != null) {
             flutterView.attachToFlutterEngine(flutterEngine)
+            this.flutterView = flutterView
         } else {
             Log.e("PresentationDisplay", "Can't find the FlutterEngine with cache name $tag")
         }

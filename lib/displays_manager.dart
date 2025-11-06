@@ -129,11 +129,12 @@ class DisplayManager {
   /// </P>
   ///
   /// return [Future<bool>] about the status has been display or not
-  Future<bool?>? hideSecondaryDisplay({required int displayId}) async {
+  Future<bool?>? hideSecondaryDisplay({required int displayId, required String routerName}) async {
     return await _displayMethodChannel?.invokeMethod<bool?>(
         _hidePresentation,
         "{"
-        "\"displayId\": $displayId"
+        "\"displayId\": $displayId,"
+        "\"routerName\": \"$routerName\""
         "}");
   }
 

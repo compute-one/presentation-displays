@@ -3,6 +3,7 @@ package com.namit.presentation_displays
 import android.content.ContentValues.TAG
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -30,21 +31,25 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
     private var context: Context? = null
     private var presentation: PresentationDisplay? = null
     private var binaryMessenger: BinaryMessenger? = null
+    private val activeEngines = mutableMapOf<String, FlutterEngine>()
 
-    override fun onAttachedToEngine(
-        flutterPluginBinding: FlutterPlugin.FlutterPluginBinding
-    ) {
+    override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         val messenger = flutterPluginBinding.binaryMessenger
         channel = MethodChannel(messenger, viewTypeId)
         channel.setMethodCallHandler(this)
 
         eventChannel = EventChannel(messenger, viewTypeEventsId)
-        displayManager =
-            flutterPluginBinding.applicationContext.getSystemService(Context.DISPLAY_SERVICE) as
-                    DisplayManager
+        displayManager = flutterPluginBinding.applicationContext
+            .getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
         val displayConnectedStreamHandler = DisplayConnectedStreamHandler(displayManager)
         eventChannel.setStreamHandler(displayConnectedStreamHandler)
         binaryMessenger = messenger
+
+        if (activeEngines.isNotEmpty()) {
+            Log.w(TAG, "Cleaning up ${activeEngines.size} stale FlutterEngines after hot restart")
+            activeEngines.values.forEach { it.destroy() }
+            activeEngines.clear()
+        }
     }
 
     private fun setup(binaryMessenger: BinaryMessenger, context: Context?) {
@@ -66,6 +71,9 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         eventChannel.setStreamHandler(null)
+
+        activeEngines.values.forEach { it.destroy() }
+        activeEngines.clear()
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -110,13 +118,22 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
             "hidePresentation" -> {
                 try {
                     val obj = JSONObject(call.arguments as String)
-                    Log.i(
-                        TAG,
-                        "Channel: method: ${call.method} | displayId: ${obj.getInt("displayId")}"
-                    )
+                    val tag = obj.optString("routerName", "")
+                    Log.i(TAG, "Hiding presentation for tag: $tag")
 
-                    presentation?.dismiss()
-                    presentation = null
+                    if (presentation != null) {
+                        if (presentation?.flutterView != null) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                presentation?.flutterView?.detachFromFlutterEngine()
+                            }
+                        }
+                        presentation?.dismiss()
+                        presentation = null;
+                    }
+                    activeEngines[tag]?.destroy()
+                    activeEngines.remove(tag)
+                    FlutterEngineCache.getInstance().remove(tag)
+
                     result.success(true)
                 } catch (e: Exception) {
                     result.error(call.method, e.message, null)
@@ -155,18 +172,26 @@ class PresentationDisplaysPlugin : FlutterPlugin, ActivityAware, MethodChannel.M
 
     private fun createFlutterEngine(tag: String): FlutterEngine? {
         if (context == null) return null
-        if (FlutterEngineCache.getInstance().get(tag) == null) {
-            val flutterEngine = FlutterEngine(context!!)
-            flutterEngine.navigationChannel.setInitialRoute(tag)
-            FlutterInjector.instance().flutterLoader().startInitialization(context!!)
-            val path = FlutterInjector.instance().flutterLoader().findAppBundlePath()
-            val entrypoint = DartExecutor.DartEntrypoint(path, "secondaryDisplayMain")
-            flutterEngine.dartExecutor.executeDartEntrypoint(entrypoint)
-            flutterEngine.lifecycleChannel.appIsResumed()
-            // Cache the FlutterEngine to be used by FlutterActivity.
-            FlutterEngineCache.getInstance().put(tag, flutterEngine)
+
+        activeEngines[tag]?.let {
+            Log.i(TAG, "Reusing existing FlutterEngine for tag: $tag")
+            return it
         }
-        return FlutterEngineCache.getInstance().get(tag)
+
+        Log.i(TAG, "Creating new FlutterEngine for tag: $tag")
+        FlutterInjector.instance().flutterLoader().startInitialization(context!!)
+        FlutterInjector.instance().flutterLoader().ensureInitializationComplete(context!!, null)
+
+        val flutterEngine = FlutterEngine(context!!)
+        val path = FlutterInjector.instance().flutterLoader().findAppBundlePath()
+        val entrypoint = DartExecutor.DartEntrypoint(path, "secondaryDisplayMain")
+        flutterEngine.dartExecutor.executeDartEntrypoint(entrypoint)
+        flutterEngine.lifecycleChannel.appIsResumed()
+
+        activeEngines[tag] = flutterEngine
+        FlutterEngineCache.getInstance().put(tag, flutterEngine)
+
+        return flutterEngine
     }
 
     override fun onDetachedFromActivity() {}
